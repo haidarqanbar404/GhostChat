@@ -1,0 +1,40 @@
+# --- Python Basics ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Virtual Environments ---
+venv/
+env/
+.venv/
+.env_folder/
+
+# --- Environment Variables (CRITICAL) ---
+.env
+
+# --- Telegram Session Files (CRITICAL) ---
+*.session
+*.session-journal
+
+# --- Database ---
+*.db
+*.sqlite3
+*.db-journal
+
+# إعدادات المحرر (VS Code / PyCharm) خاصة بجهازك فقط
+.vscode/
+.idea/
+*.swp
+
+# --- OS Files ---
+.DS_Store
+Thumbs.db
+
+# --- Logs ---
+*.log
+errors.txt
+
+# --- Build Folders (If you convert to .exe later) ---
+build/
+dist/
+*.spec
