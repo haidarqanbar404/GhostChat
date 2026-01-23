@@ -38,3 +38,7 @@ errors.txt
 build/
 dist/
 *.spec
+*.json
+*.db-shm
+*.db-wal
+login_tool.py

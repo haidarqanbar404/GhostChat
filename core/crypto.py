@@ -1,47 +1,33 @@
 from cryptography.fernet import Fernet
-import zlib
 import base64
+import os
 
 class CryptoEngine:
-    def __init__(self, key: str):
-        try:
-            self.fernet = Fernet(key.encode() if isinstance(key, str) else key)
-        except Exception as e:
-            raise ValueError(f"Invalid Key: {e}")
+    def __init__(self):
+        pass
 
     @staticmethod
     def generate_key() -> str:
-        return Fernet.generate_key().decode()
+        """توليد مفتاح جديد وإرجاعه كنص"""
+        key = Fernet.generate_key()
+        return key.decode()
 
-    def encrypt(self, plain_text: str) -> bytes:
-        data = plain_text.encode('utf-8')
-        compressed_data = zlib.compress(data, level=9)
-        encrypted_token = self.fernet.encrypt(compressed_data)
-        return encrypted_token
-
-    def decrypt(self, encrypted_token: bytes) -> str:
-
+    def encrypt(self, message: str, key: str) -> str:
+        """تشفير الرسالة باستخدام مفتاح محدد"""
         try:
-            decrypted_compressed = self.fernet.decrypt(encrypted_token)
-            decompressed_data = zlib.decompress(decrypted_compressed)
-            return decompressed_data.decode('utf-8')
+            f = Fernet(key.encode())
+            encrypted_bytes = f.encrypt(message.encode())
+            return encrypted_bytes.decode()
         except Exception as e:
-            raise ValueError("Decryption failed. Data might be corrupted or key is wrong.") from e
+            print(f"Encryption Error: {e}")
+            return ""
 
-if __name__ == "__main__":
-    my_key = CryptoEngine.generate_key()
-    print(f"Generated Key: {my_key}")
-    
-    engine = CryptoEngine(my_key)
-    
-    original_msg = "اذهب إلى المقهى القديم عند الساعة الخامسة."
-    print(f"Original: {original_msg}")
-    
-    enc = engine.encrypt(original_msg)
-    print(f"Encrypted (Bytes): {len(enc)} bytes -> {enc[:20]}...")
-    
-    dec = engine.decrypt(enc)
-    print(f"Decrypted: {dec}")
-    
-    assert original_msg == dec
-    print("✅ Test Passed")
+    def decrypt(self, encrypted_token: str, key: str) -> str:
+        """فك تشفير الرسالة باستخدام مفتاح محدد"""
+        try:
+            f = Fernet(key.encode())
+            decrypted_bytes = f.decrypt(encrypted_token.encode())
+            return decrypted_bytes.decode()
+        except Exception as e:
+            # print(f"Decryption Error: {e}") 
+            return None

@@ -1,62 +1,59 @@
-from sqlalchemy import create_engine, String, Integer, Boolean, DateTime, Text, ForeignKey, BigInteger
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
+from sqlalchemy import create_engine, Column, Integer, String, Text, Boolean, ForeignKey, DateTime
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 import os
-from dotenv import load_dotenv
+import sys
 
-load_dotenv()
 
-DB_URL = os.getenv("DATABASE_URL")
-engine = create_engine(DB_URL, echo=False) 
-SessionLocal = sessionmaker(bind=engine)
+if getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-if not DB_URL:
-    raise ValueError("CRITICAL ERROR: DATABASE_URL not found in .env file!")
+DB_PATH = os.path.join(BASE_DIR, "ghost_chat.db")
 
-class Base(DeclarativeBase):
-    pass
+
+engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False})
+
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
 
 class Contact(Base):
-
     __tablename__ = "contacts"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False) 
-    username: Mapped[str] = mapped_column(String(50), nullable=True)
     
-    shared_key: Mapped[str] = mapped_column(String, nullable=False)
-    
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-    messages: Mapped[list["DecryptedMessage"]] = relationship(back_populates="contact", cascade="all, delete-orphan")
-
-    def __repr__(self):
-        return f"<Contact(name={self.username}, id={self.telegram_id})>"
+    id = Column(Integer, primary_key=True, index=True)
+    telegram_id = Column(Integer, nullable=True)
+    username = Column(String, unique=True, index=True)
+    shared_key = Column(String)
 
 class DecryptedMessage(Base):
+    __tablename__ = "messages"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    contact_id = Column(Integer, ForeignKey("contacts.id"))
+    real_content = Column(Text)
+    timestamp = Column(DateTime, default=datetime.now)
+    is_sent_by_me = Column(Boolean, default=False)
 
-    __tablename__ = "decrypted_messages"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    
-    telegram_message_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    
-    contact_id: Mapped[int] = mapped_column(ForeignKey("contacts.id"))
-    contact: Mapped["Contact"] = relationship(back_populates="messages")
-    
-    real_content: Mapped[str] = mapped_column(Text, nullable=False)
-    
-    is_sent_by_me: Mapped[bool] = mapped_column(Boolean, default=False)
-    
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-    def __repr__(self):
-        sender = "Me" if self.is_sent_by_me else "Friend"
-        return f"<{sender}: {self.real_content[:20]}...>"
 
 def init_db():
-    Base.metadata.create_all(engine)
-    print("Database tables created successfully.")
+    Base.metadata.create_all(bind=engine)
 
-if __name__ == "__main__":
-    init_db()
+def save_message(contact_id, text, is_sent_by_me):
+    db = SessionLocal()
+    try:
+        msg = DecryptedMessage(
+            contact_id=contact_id,
+            real_content=text,
+            is_sent_by_me=is_sent_by_me,
+            timestamp=datetime.now()
+        )
+        db.add(msg)
+        db.commit()
+    except Exception as e:
+        print(f"Database Error: {e}")
+        db.rollback()
+    finally:
+        db.close()
