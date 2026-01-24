@@ -34,7 +34,7 @@ Before running the application, ensure you have the following:
 
 1.  **Clone the repository:**
     ```bash
-    [git clone (https://github.com/haidarqanbar404/GhostChat.git)]
+    git clone https://github.com/haidarqanbar404/GhostChat.git
     cd GhostChat
     ```
 
