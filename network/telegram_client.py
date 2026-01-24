@@ -9,6 +9,9 @@ from core.ai import AIEngine
 from database.models import SessionLocal, Contact, DecryptedMessage, save_message
 import time
 from tkinter import simpledialog
+import threading
+
+db_lock = threading.Lock()
 
 load_dotenv()
 
@@ -25,24 +28,13 @@ class GhostNetwork:
         try: api_id_int = int(self.api_id)
         except: api_id_int = 0
 
-        # --- التعديل الجذري: تحديد مسار مطلق لملف الجلسة ---
-        # هذا يضمن أن البرنامج يجد ملف الجلسة دائماً في المجلد الرئيسي للمشروع
         if getattr(sys, 'frozen', False):
             base_path = os.path.dirname(sys.executable)
         else:
-            # نعود خطوة للوراء لأننا داخل مجلد network
             base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            
-        # دمج المسار مع اسم الجلسة
         session_path = os.path.join(base_path, self.session_name)
 
-        # نمرر المسار الكامل للعميل
-        self.client = TelegramClient(
-            session_path,  # <--- هنا التغيير المهم
-            api_id_int, 
-            self.api_hash,
-            system_version="4.16.30-vxCUSTOM"
-        )
+        self.client = TelegramClient(session_path, api_id_int, self.api_hash, system_version="4.16.30-vxCUSTOM")
 
         self.stego = SteganographyEngine()
         self.crypto = CryptoEngine()
@@ -74,16 +66,65 @@ class GhostNetwork:
         def password_callback(): return safe_input_request("Password", "Password:", True)
 
         await self.client.start(phone=phone_callback, code_callback=code_callback, password=password_callback)
-        print("✅ Connected successfully!")
+        print("Connected successfully!")
+        
+        print("Syncing missed messages...")
+        await self.sync_missed_messages()
+        print("Sync complete!")
+
         self.client.add_event_handler(self.handle_incoming_message, events.NewMessage(incoming=True))
         await self.client.run_until_disconnected()
+
+    async def sync_missed_messages(self):
+        try:
+            with db_lock:
+                db = SessionLocal()
+                contacts = db.query(Contact).all()
+            
+            if not contacts:
+                db.close(); return
+
+            print("Syncing only NEW messages...")
+
+            for contact in contacts:
+                try:
+                    last_msg = db.query(DecryptedMessage).filter(DecryptedMessage.contact_id == contact.id).order_by(DecryptedMessage.telegram_message_id.desc()).first()
+                    last_known_id = last_msg.telegram_message_id if last_msg else 0
+                    
+                    temp_messages = []
+
+                    async for message in self.client.iter_messages(contact.username, min_id=last_known_id, limit=20):
+                        if message.text:
+                            temp_messages.append(message)
+
+                    for message in reversed(temp_messages):
+                        encrypted_payload = self.stego.reveal_data(message.text)
+                        
+                        if encrypted_payload:
+                            decrypted = self.crypto.decrypt(encrypted_payload, contact.shared_key)
+                            
+                            if decrypted:
+                                is_me = message.out
+                                sender_name = "ME" if is_me else f"@{contact.username}"
+                                
+                                print(f"   Synced [{sender_name}]: {decrypted}")
+                                
+                                save_message(contact.id, decrypted, is_sent_by_me=is_me, telegram_id=message.id)
+
+                except Exception as e:
+                    print(f"   Sync skip for {contact.username}: {e}")
+            
+            db.close()
+
+        except Exception as e:
+            print(f"Sync Error: {e}")
 
     async def send_ghost_message(self, username, secret_text):
         try:
             db = SessionLocal()
             contact = db.query(Contact).filter(Contact.username == username).first()
             if not contact:
-                print(f"❌ Error: Contact {username} not found.")
+                print(f"Error: Contact {username} not found.")
                 db.close(); return
 
             shared_key = contact.shared_key
@@ -91,7 +132,6 @@ class GhostNetwork:
 
             encrypted_data = self.crypto.encrypt(secret_text, shared_key)
             
-            # جلب السياق والذكاء الاصطناعي
             history = []
             try:
                 async for message in self.client.iter_messages(username, limit=3):
@@ -110,7 +150,7 @@ class GhostNetwork:
             save_message(contact.id, secret_text, is_sent_by_me=True)
 
         except Exception as e:
-            print(f"⚠️ Send Error: {e}")
+            print(f"Send Error: {e}")
 
     async def handle_incoming_message(self, event):
         try:
@@ -129,7 +169,7 @@ class GhostNetwork:
             if encrypted_payload:
                 decrypted = self.crypto.decrypt(encrypted_payload, shared_key)
                 if decrypted:
-                    print(f"📩 Decrypted from @{username}: {decrypted}")
+                    print(f"Decrypted from @{username}: {decrypted}")
                     save_message(contact.id, decrypted, is_sent_by_me=False)
                     if self.on_message_received:
                         self.on_message_received(username, decrypted)

@@ -4,7 +4,8 @@ from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
 import os
 import sys
-
+import threading
+db_lock = threading.Lock()
 
 if getattr(sys, 'frozen', False):
     BASE_DIR = os.path.dirname(sys.executable)
@@ -33,6 +34,7 @@ class DecryptedMessage(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     contact_id = Column(Integer, ForeignKey("contacts.id"))
+    telegram_message_id = Column(Integer, unique=True, nullable=True)
     real_content = Column(Text)
     timestamp = Column(DateTime, default=datetime.now)
     is_sent_by_me = Column(Boolean, default=False)
@@ -41,19 +43,26 @@ class DecryptedMessage(Base):
 def init_db():
     Base.metadata.create_all(bind=engine)
 
-def save_message(contact_id, text, is_sent_by_me):
-    db = SessionLocal()
-    try:
-        msg = DecryptedMessage(
-            contact_id=contact_id,
-            real_content=text,
-            is_sent_by_me=is_sent_by_me,
-            timestamp=datetime.now()
-        )
-        db.add(msg)
-        db.commit()
-    except Exception as e:
-        print(f"Database Error: {e}")
-        db.rollback()
-    finally:
-        db.close()
+def save_message(contact_id, text, is_sent_by_me, telegram_id=None):
+    with db_lock:
+        db = SessionLocal()
+        try:
+            if telegram_id:
+                exists = db.query(DecryptedMessage).filter(DecryptedMessage.telegram_message_id == telegram_id).first()
+                if exists:
+                    return 
+
+            msg = DecryptedMessage(
+                contact_id=contact_id,
+                real_content=text,
+                is_sent_by_me=is_sent_by_me,
+                timestamp=datetime.now(),
+                telegram_message_id=telegram_id 
+            )
+            db.add(msg)
+            db.commit()
+        except Exception as e:
+            print(f"Database Error: {e}")
+            db.rollback()
+        finally:
+            db.close()

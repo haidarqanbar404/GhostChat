@@ -58,7 +58,6 @@ class GhostChatApp(ctk.CTk):
         self.geometry("1100x700")
         self.configure(fg_color=COLOR_BG)
 
-        # تحميل الأيقونات
         try:
             icon_path = resource_path(os.path.join("assets", "app_icon.ico"))
             if os.path.exists(icon_path):
@@ -68,15 +67,14 @@ class GhostChatApp(ctk.CTk):
         self.assets = {}
         self.load_assets()
         
-        # --- التعديل هنا: حذفنا withdraw لنبقي النافذة ظاهرة دائماً ---
-        # بدلاً من الإخفاء، نطلب الإعدادات فوراً والنافذة مفتوحة في الخلفية
+
         self.user_config = self.load_or_ask_credentials()
 
         self.telegram_loop = None
         init_db()
         self.current_chat_contact = None 
-        
-        # --- نصيحة: علق هذا السطر مؤقتاً لأنه قد يجمد البرنامج إذا كان النت بطيئاً ---
+        self.active_view = "dashboard" 
+        threading.Thread(target=self.check_and_pull_model, daemon=True).start()
         # self.check_and_pull_model() 
 
         self.ghost = GhostNetwork(
@@ -93,7 +91,6 @@ class GhostChatApp(ctk.CTk):
         self.load_contacts()
         self.enable_global_copy_paste()
 
-        # تشغيل التلغرام
         self.launch_telegram_thread()
 
     def launch_telegram_thread(self):
@@ -123,12 +120,10 @@ class GhostChatApp(ctk.CTk):
         dialog.geometry("400x500")
         dialog.attributes("-topmost", True)
         
-        # متغير للتحقق هل تم الحفظ أم لا
         self.setup_finished = False 
 
         def on_close():
             dialog.destroy()
-            # لا نغلق البرنامج هنا، نترك __init__ يقرر
             
         dialog.protocol("WM_DELETE_WINDOW", on_close)
         
@@ -166,15 +161,13 @@ class GhostChatApp(ctk.CTk):
             with open(CONFIG_PATH, "w") as f:
                 json.dump(self.setup_result, f)
             
-            self.setup_finished = True # تم الحفظ بنجاح
+            self.setup_finished = True 
             dialog.destroy()
 
         ctk.CTkButton(dialog, text="Save & Start", command=save, fg_color="#00dc82").pack(pady=30)
         
-        # ننتظر إغلاق النافذة
         self.wait_window(dialog)
         
-        # الآن نتحقق: هل تم الحفظ؟ إذا لا، نغلق البرنامج
         if not self.setup_finished and not self.setup_result:
             sys.exit(0)
             
@@ -207,7 +200,6 @@ class GhostChatApp(ctk.CTk):
         entry_phone.pack(fill="x", padx=30, pady=5)
         self.fix_input_field(entry_phone, root_window=dialog) 
 
-        # متغير لتخزين النتيجة
         self.setup_result = {}
 
         def save_and_close():
@@ -230,13 +222,26 @@ class GhostChatApp(ctk.CTk):
 
         ctk.CTkButton(dialog, text="Save & Start", command=save_and_close, fg_color="#00dc82").pack(pady=30)
         
-        # ننتظر حتى يتم إغلاق النافذة (Block execution)
         self.wait_window(dialog)
         
         if not self.setup_result:
             sys.exit(0)
             
         return self.setup_result
+    def setup_context_menu(self, widget):
+        menu = tk.Menu(widget, tearoff=0)
+        menu.add_command(label="Cut", command=lambda: widget.event_generate("<<Cut>>"))
+        menu.add_command(label="Copy", command=lambda: widget.event_generate("<<Copy>>"))
+        menu.add_command(label="Paste", command=lambda: widget.event_generate("<<Paste>>"))
+        menu.add_separator()
+        menu.add_command(label="Select All", command=lambda: widget.event_generate("<<SelectAll>>"))
+
+        def show_menu(event):
+            menu.tk_popup(event.x_root, event.y_root)
+
+        widget.bind("<Button-3>", show_menu)
+        
+        widget.bind("<Control-a>", lambda e: widget.event_generate("<<SelectAll>>"))
 
     def load_assets(self):
         assets_dir = resource_path("assets")
@@ -257,6 +262,9 @@ class GhostChatApp(ctk.CTk):
             "copy": ("icon_copy.png", (20, 20)),
             "paste": ("icon_paste.png", (20, 20)),
             "select_all": ("icon_select_all.png", (20, 20)),
+            "dashboard": ("icon_dashboard.png", (20,20)),
+            "ai": ("icon_ai.png", (20,20)),
+            
         }
 
         for key, (filename, size) in files.items():
@@ -282,7 +290,7 @@ class GhostChatApp(ctk.CTk):
         self.logo_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         self.logo_frame.grid(row=0, column=0, padx=20, pady=(30, 20), sticky="w")
         
-        if self.assets["logo"]:
+        if self.assets.get("logo"):
             logo_lbl = ctk.CTkLabel(self.logo_frame, text="", image=self.assets["logo"])
             logo_lbl.pack(side="left")
         else:
@@ -292,15 +300,34 @@ class GhostChatApp(ctk.CTk):
         logo_text = ctk.CTkLabel(self.logo_frame, text="GhostChat", font=("Segoe UI", 18, "bold"), text_color="white")
         logo_text.pack(side="left", padx=10)
 
-        chat_btn = ctk.CTkButton(self.sidebar, text="  AI Chat", image=self.assets["chat"], compound="left",
-                                 anchor="w", fg_color="#1e1e24", text_color="white", hover_color=COLOR_BTN_HOVER,
-                                 font=("Segoe UI", 14), height=40, corner_radius=8)
-        chat_btn.grid(row=1, column=0, padx=15, pady=2, sticky="ew")
-
+        ctk.CTkButton(
+            self.sidebar, 
+            text="Dashboard", 
+            image=self.assets.get("dashboard"),
+            compound="left",
+            fg_color="transparent", 
+            text_color="#8a8a93",
+            hover_color=COLOR_BTN_HOVER,
+            height=40, anchor="w", font=("Segoe UI", 14),
+            command=self.show_dashboard
+        ).grid(row=1, column=0, padx=15, pady=2, sticky="ew")
+        
+        ctk.CTkButton(
+            self.sidebar, 
+            text="AI Lab",
+            image=self.assets.get("ai"),
+            compound="left", 
+            fg_color="transparent", 
+            text_color="#8a8a93",
+            hover_color=COLOR_BTN_HOVER,
+            height=40, anchor="w", font=("Segoe UI", 14),
+            command=self.show_ai_playground
+        ).grid(row=2, column=0, padx=15, pady=2, sticky="ew")
+        
         self.btn_profile = ctk.CTkButton(
             self.sidebar, 
             text="  Profile", 
-            image=self.assets["profile"],
+            image=self.assets.get("profile"),
             compound="left", 
             anchor="w", 
             fg_color="transparent", 
@@ -309,12 +336,12 @@ class GhostChatApp(ctk.CTk):
             font=("Segoe UI", 14), height=40, corner_radius=8,
             command=self.open_profile_window  
         )
-        self.btn_profile.grid(row=2, column=0, padx=15, pady=2, sticky="ew")
+        self.btn_profile.grid(row=3, column=0, padx=15, pady=2, sticky="ew")
 
         self.btn_settings = ctk.CTkButton(
             self.sidebar, 
             text="  Settings", 
-            image=self.assets["settings"],
+            image=self.assets.get("settings"),
             compound="left",
             anchor="w", 
             fg_color="transparent", 
@@ -323,7 +350,7 @@ class GhostChatApp(ctk.CTk):
             font=("Segoe UI", 14), height=40, corner_radius=8,
             command=self.open_settings_window 
         )
-        self.btn_settings.grid(row=3, column=0, padx=15, pady=2, sticky="ew")
+        self.btn_settings.grid(row=4, column=0, padx=15, pady=2, sticky="ew")
 
         contact_lbl = ctk.CTkLabel(self.sidebar, text="CONTACTS", font=("Segoe UI", 11, "bold"), text_color=COLOR_TEXT_DIM, anchor="w")
         contact_lbl.grid(row=8, column=0, padx=25, pady=(20, 10), sticky="w")
@@ -343,7 +370,7 @@ class GhostChatApp(ctk.CTk):
         self.btn_logout = ctk.CTkButton(
             self.sidebar, 
             text="  Log out", 
-            image=self.assets["logout"], 
+            image=self.assets.get("logout"), 
             compound="left",
             anchor="w", 
             fg_color="transparent",           
@@ -357,35 +384,21 @@ class GhostChatApp(ctk.CTk):
     def create_main_area(self):
         self.main_frame = ctk.CTkFrame(self, fg_color=COLOR_BG)
         self.main_frame.grid(row=0, column=1, sticky="nsew")
-        self.main_frame.grid_rowconfigure(1, weight=1)
-        self.main_frame.grid_columnconfigure(0, weight=1)
+        self.main_frame.grid_rowconfigure(1, weight=1); self.main_frame.grid_columnconfigure(0, weight=1)
 
-        self.header = ctk.CTkFrame(self.main_frame, height=60, fg_color="transparent")
-        self.header.grid(row=0, column=0, sticky="ew", padx=30, pady=(20, 10))
-        self.header_title = ctk.CTkLabel(self.header, text="AI Ghost Chat", font=("Segoe UI", 16, "bold"), text_color="white")
+        self.header_frame = ctk.CTkFrame(self.main_frame, height=60, fg_color="transparent")
+        self.header_frame.grid(row=0, column=0, sticky="ew", padx=30, pady=20)
+        self.header_title = ctk.CTkLabel(self.header_frame, text="Dashboard", font=("Segoe UI", 20, "bold"), text_color="white")
         self.header_title.pack(side="left")
         
-        self.clear_button = ctk.CTkButton(
-            self.header, 
-            text=" Clear",        
-            image=self.assets.get("clear"),
-            compound="left",      
-            width=80,
-            height=30,
-            fg_color="transparent", 
-            border_width=1,
-            border_color="#3E3E3E", 
-            text_color="#AAAAAA",
-            hover_color="#C62828",  
-            command=self.clear_chat_display 
-        )
-        self.clear_button.pack(side="right")
-
+        self.clear_btn = ctk.CTkButton(self.header_frame, text="Clear", width=60, fg_color="transparent", border_width=1, hover_color="#C62828", command=self.clear_chat_display)
+        
         self.chat_display_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.chat_display_frame.grid(row=1, column=0, sticky="nsew", padx=30, pady=10)
         
-        self.show_hero_section()
         self.create_input_bar()
+        
+        self.show_dashboard()
 
     def show_hero_section(self):
         for w in self.chat_display_frame.winfo_children(): w.destroy()
@@ -400,10 +413,11 @@ class GhostChatApp(ctk.CTk):
         ctk.CTkLabel(hero, text="Steganography • Encryption • Privacy", font=("Segoe UI", 16), text_color=COLOR_TEXT_DIM).pack(pady=(0, 30))
 
     def create_input_bar(self):
-        container = ctk.CTkFrame(self.main_frame, height=80, fg_color="transparent")
-        container.grid(row=2, column=0, sticky="ew", padx=30, pady=20)
+        self.input_container = ctk.CTkFrame(self.main_frame, height=80, fg_color="transparent")
+        # container = ctk.CTkFrame(self.main_frame, height=80, fg_color="transparent")
+        # container.grid(row=2, column=0, sticky="ew", padx=30, pady=20)
         
-        self.input_bg = ctk.CTkFrame(container, height=55, corner_radius=25, fg_color=COLOR_INPUT_BG)
+        self.input_bg = ctk.CTkFrame(self.input_container, height=55, corner_radius=25, fg_color=COLOR_INPUT_BG)
         self.input_bg.pack(fill="x", side="bottom")
 
         img_attach = self.assets["attach"]
@@ -417,13 +431,93 @@ class GhostChatApp(ctk.CTk):
         self.msg_entry = ctk.CTkEntry(self.input_bg, placeholder_text="Type a hidden message...", border_width=0, 
                                       fg_color="transparent", text_color="white", font=("Segoe UI", 14), height=40)
         self.msg_entry.pack(side="left", fill="x", expand=True, padx=10)
-        self.msg_entry.bind("<Return>", self.send_message)
+        self.msg_entry.bind("<Return>", self.handle_send_action)
+
+        self.fix_input_field(self.msg_entry)
 
         img_send = self.assets["send"]
         t_send = "" if img_send else "➤"
         self.send_btn = ctk.CTkButton(self.input_bg, text=t_send, image=img_send, width=45, height=35, corner_radius=18,
                                       fg_color=COLOR_ACCENT, hover_color="#00b368", text_color="black", command=self.send_message)
         self.send_btn.pack(side="right", padx=10, pady=10)
+
+    def show_dashboard(self):
+        self.active_view = "dashboard"
+        self.current_chat_contact = None
+        self.header_title.configure(text="System Status")
+        
+        if hasattr(self, 'clear_btn'): self.clear_btn.pack_forget()
+        
+        if hasattr(self, 'input_container'): 
+            self.input_container.grid_forget()
+
+        for w in self.chat_display_frame.winfo_children(): w.destroy()
+        
+        self.chat_display_frame.grid_rowconfigure(0, weight=1)
+        self.chat_display_frame.grid_columnconfigure(0, weight=1)
+
+        try:
+            db = SessionLocal()
+            contacts_count = db.query(Contact).count()
+            messages_count = db.query(DecryptedMessage).count()
+            db.close()
+        except:
+            contacts_count = 0
+            messages_count = 0
+
+        dash = ctk.CTkFrame(self.chat_display_frame, fg_color="transparent")
+        dash.grid(row=0, column=0, sticky="nsew")
+        
+        center_box = ctk.CTkFrame(dash, fg_color="transparent")
+        center_box.place(relx=0.5, rely=0.45, anchor="center")
+
+        if "logo" in self.assets and self.assets["logo"]:
+            logo_label = ctk.CTkLabel(center_box, text="", image=self.assets["logo"])
+            logo_label.pack(pady=(0, 10))
+        else:
+            ctk.CTkLabel(center_box, text="👻",image=self.assets.get("app_icon"), 
+            compound="left", font=("Arial", 90)).pack(pady=(0, 10))
+
+        ctk.CTkLabel(center_box, text="GhostChat Active", font=("Segoe UI", 32, "bold"), text_color="#00dc82").pack(pady=10)
+        
+        status_box = ctk.CTkFrame(center_box, fg_color="#1e1e24", corner_radius=15, width=400)
+        status_box.pack(pady=20, ipadx=30, ipady=20)
+        
+        grid_stats = ctk.CTkFrame(status_box, fg_color="transparent")
+        grid_stats.pack(pady=10)
+        
+        c_frame = ctk.CTkFrame(grid_stats, fg_color="transparent")
+        c_frame.pack(side="left", padx=20)
+        ctk.CTkLabel(c_frame, text=f"{contacts_count}", font=("Segoe UI", 24, "bold"), text_color="white").pack()
+        ctk.CTkLabel(c_frame, text="Contacts", font=("Segoe UI", 12), text_color="gray").pack()
+
+        ctk.CTkFrame(grid_stats, width=1, height=40, fg_color="gray").pack(side="left")
+
+        m_frame = ctk.CTkFrame(grid_stats, fg_color="transparent")
+        m_frame.pack(side="left", padx=20)
+        ctk.CTkLabel(m_frame, text=f"{messages_count}", font=("Segoe UI", 24, "bold"), text_color="white").pack()
+        ctk.CTkLabel(m_frame, text="Messages", font=("Segoe UI", 12), text_color="gray").pack()
+
+        ctk.CTkLabel(status_box, text="_________________", text_color="#333333").pack(pady=5)
+        ctk.CTkLabel(status_box, text="🟢 System: Online", font=("Segoe UI", 14), text_color="#00dc82").pack(pady=5)
+        ctk.CTkLabel(status_box, text="🔒 Security: AES-256", font=("Segoe UI", 14), text_color="#aaaaaa").pack(pady=2)
+
+    def show_ai_playground(self):
+        self.active_view = "ai_lab"
+        self.current_chat_contact = None
+        self.header_title.configure(text="🤖 AI Simulation Lab")
+        if hasattr(self, 'clear_btn'): self.clear_btn.pack(side="right")        
+        for w in self.chat_display_frame.winfo_children(): w.destroy()
+        self.chat_display_frame.grid_rowconfigure(0, weight=1)
+        
+        self.messages_box = ctk.CTkTextbox(self.chat_display_frame, fg_color="transparent", text_color="white", state="disabled", wrap="word", font=("Segoe UI", 14))
+        self.messages_box.grid(row=0, column=0, sticky="nsew")
+        self.fix_input_field(self.messages_box)
+        
+        self.append_message_to_ui("System", "Welcome to AI Lab! Type anything to test the Syrian AI cover text generator.")
+        
+        self.input_container.grid(row=2, column=0, sticky="ew", padx=30, pady=20)
+        self.msg_entry.focus()
 
     def start_telegram_client(self):
         loop = asyncio.new_event_loop()
@@ -434,7 +528,7 @@ class GhostChatApp(ctk.CTk):
         try:
             loop.run_until_complete(self.ghost.start())
         except Exception as e:
-            print(f"❌ Telegram Client Error: {e}")
+            print(f"Telegram Client Error: {e}")
         finally:
             loop.close()
 
@@ -477,34 +571,142 @@ class GhostChatApp(ctk.CTk):
             btn.pack(pady=2, fill="x")
 
     def select_contact(self, username):
+        self.active_view = "chat"
         self.current_chat_contact = username
         self.header_title.configure(text=f"Secured Channel: @{username}")
+
+        if hasattr(self, 'clear_btn'): self.clear_btn.pack(side="right")
+
         for w in self.chat_display_frame.winfo_children(): w.destroy()
         
         self.chat_display_frame.grid_rowconfigure(0, weight=1)
-        self.messages_box = ctk.CTkTextbox(self.chat_display_frame, fg_color="transparent", text_color="white", 
-                                           font=("Segoe UI", 14), state="disabled", wrap="word")
-        self.messages_box.grid(row=0, column=0, sticky="nsew")
-        self.fix_input_field(self.messages_box) 
+        
+
+        self.chat_scroll = ctk.CTkScrollableFrame(self.chat_display_frame, fg_color="transparent")
+        self.chat_scroll.grid(row=0, column=0, sticky="nsew")
+
+        if hasattr(self, 'input_container'):
+            self.input_container.grid(row=2, column=0, sticky="ew", padx=30, pady=20)
+        self.msg_entry.focus()
 
         db = SessionLocal()
         contact = db.query(Contact).filter(Contact.username == username).first()
         if contact:
-            msgs = db.query(DecryptedMessage).filter(DecryptedMessage.contact_id == contact.id).order_by(DecryptedMessage.timestamp).all()
+            msgs = db.query(DecryptedMessage).filter(
+                DecryptedMessage.contact_id == contact.id
+            ).order_by(
+                DecryptedMessage.telegram_message_id.asc(),
+                DecryptedMessage.id.asc()
+            ).all()
+            
             for m in msgs:
-                sender = "Me" if m.is_sent_by_me else username
-                self.append_message_to_ui(sender, m.real_content)
+                if hasattr(self, 'append_message_bubble'):
+                    self.append_message_bubble(m.is_sent_by_me, m.real_content, m.timestamp)
+                else:
+                    sender = "Me" if m.is_sent_by_me else username
+                    self.append_message_to_ui(sender, m.real_content)
         db.close()
+        
+        if hasattr(self, 'scroll_to_bottom'): self.scroll_to_bottom()
+
+
+    def append_message_bubble(self, is_me, text, timestamp=None):
+        if not hasattr(self, 'chat_scroll') or not self.chat_scroll.winfo_exists(): return
+        
+        if is_me:
+            align_anchor = "e"   
+            bubble_color = COLOR_ACCENT 
+            text_color = "black"    
+            justify = "left"        
+        else:
+            align_anchor = "w"      
+            bubble_color = "#2b2b2b" 
+            text_color = "white"
+            justify = "left"
+
+        if timestamp is None: timestamp = datetime.now()
+        time_str = timestamp.strftime('%H:%M')
+
+        msg_container = ctk.CTkFrame(self.chat_scroll, fg_color="transparent")
+        msg_container.pack(fill="x", pady=5, padx=10)
+
+        bubble = ctk.CTkFrame(msg_container, fg_color=bubble_color, corner_radius=15)
+        bubble.pack(anchor=align_anchor, padx=5)
+
+        label = ctk.CTkLabel(bubble, text=text, text_color=text_color, font=("Segoe UI", 14), 
+                             wraplength=400, justify=justify)
+        label.pack(padx=15, pady=(10, 5))
+
+        time_lbl = ctk.CTkLabel(bubble, text=time_str, text_color=text_color, font=("Arial", 10))
+        time_lbl.pack(anchor="e" if is_me else "w", padx=15, pady=(0, 5))
+
+        if hasattr(self, 'enable_bubble_copy'):
+            self.enable_bubble_copy(label, text)
+            self.enable_bubble_copy(bubble, text)
+
+        if hasattr(self, 'scroll_to_bottom'):
+            self.scroll_to_bottom()
+
+    def scroll_to_bottom(self):
+        if hasattr(self, 'chat_scroll') and self.chat_scroll.winfo_exists():
+            try:
+                self.chat_scroll.update_idletasks()
+                self.chat_scroll._parent_canvas.yview_moveto(1.0)
+            except: pass
+
+    def handle_send_action(self, event=None):
+        text = self.msg_entry.get().strip()
+        if not text: return
+        self.msg_entry.delete(0, "end")
+
+        if self.active_view == "chat" and self.current_chat_contact:
+            self.append_message_to_ui("Me", text)
+            threading.Thread(target=self._run_async_send, args=(self.current_chat_contact, text)).start()
+        
+        elif self.active_view == "ai_lab":
+            self.append_message_to_ui("Me (Test)", text)
+            threading.Thread(target=self._run_ai_simulation, args=(text,)).start()
+
+    def _run_ai_simulation(self, user_text):
+        fake_history = [f"صديقي: {user_text}"]
+        
+        self.after(0, lambda: self.header_title.configure(text="🤖 AI is generating..."))
+        
+        try:
+            response = self.ghost.ai.generate_cover_text(fake_history)
+            self.after(0, lambda: self.append_message_to_ui("AI Cover", f"Original: (Hidden)\nCover Text: {response}"))
+        except Exception as e:
+            self.after(0, lambda: self.append_message_to_ui("System", f"Error: {e}"))
+        finally:
+            self.after(0, lambda: self.header_title.configure(text="🤖 AI Simulation Lab"))
 
     def append_message_to_ui(self, sender, text):
-        if not hasattr(self, 'messages_box'): return
-        self.messages_box.configure(state="normal")
-        time_str = datetime.now().strftime("%H:%M")
+        is_me = True if sender.startswith("Me") else False
+        if self.active_view == "ai_lab" and hasattr(self, 'messages_box'):
+             self.messages_box.configure(state="normal")
+             time_str = datetime.now().strftime('%H:%M')
+             if sender == "AI Cover":
+                 self.messages_box.insert("end", f"\n──────────────\n🤖 {sender} [{time_str}]\n{text}\n──────────────\n")
+             else:
+                 self.messages_box.insert("end", f"\n ► {sender} [{time_str}]\n{text}\n\n")
+             self.messages_box.see("end")
+             self.messages_box.configure(state="disabled")
+        else:
+             self.append_message_bubble(is_me, text)
+
+    def enable_bubble_copy(self, widget, text_to_copy):
+        menu = tk.Menu(widget, tearoff=0, bg="white", fg="black")
+        menu.add_command(label="📋 Copy Message", command=lambda: self.clipboard_clear() or self.clipboard_append(text_to_copy))
         
-        header = f" ► {sender} [{time_str}]"
-        self.messages_box.insert("end", f"\n{header}\n{text}\n\n")
-        self.messages_box.see("end")
-        self.messages_box.configure(state="disabled")
+        def show_menu(event):
+            try: menu.tk_popup(event.x_root, event.y_root)
+            finally: menu.grab_release()
+
+        widget.bind("<Button-3>", show_menu)
+        if sys.platform == "darwin": widget.bind("<Button-2>", show_menu)
+
+
+    
 
     def send_message(self, event=None):
         text = self.msg_entry.get()
@@ -527,7 +729,11 @@ class GhostChatApp(ctk.CTk):
             self.append_message_to_ui(sender, text)
 
     def clear_chat_display(self):
-        if hasattr(self, 'messages_box'):
+        if hasattr(self, 'chat_scroll') and self.chat_scroll.winfo_exists():
+            for child in self.chat_scroll.winfo_children():
+                child.destroy()
+        
+        if hasattr(self, 'messages_box') and self.messages_box.winfo_exists():
             self.messages_box.configure(state="normal")
             self.messages_box.delete("1.0", "end")
             self.messages_box.configure(state="disabled")
@@ -537,8 +743,13 @@ class GhostChatApp(ctk.CTk):
         window.title("My Profile")
         window.geometry("300x250")
         window.attributes("-topmost", True)
+        try:
+            icon_path = resource_path(os.path.join("assets", "app_icon.ico"))
+            if os.path.exists(icon_path):
+                window.after(200, lambda: window.iconbitmap(icon_path))
+        except: pass
 
-        ctk.CTkLabel(window, text="👤 User Profile", font=("Arial", 18, "bold")).pack(pady=20)
+        ctk.CTkLabel(window, text="User Profile",image=self.assets["profile"], compound="left", font=("Arial", 18, "bold")).pack(pady=20)
         
         info_frame = ctk.CTkFrame(window)
         info_frame.pack(padx=20, fill="x")
@@ -554,8 +765,17 @@ class GhostChatApp(ctk.CTk):
         window.title("Settings")
         window.geometry("300x300")
         window.attributes("-topmost", True)
-        
-        ctk.CTkLabel(window, text="⚙️ Settings", font=("Arial", 18, "bold")).pack(pady=20)
+        try:
+            icon_path = resource_path(os.path.join("assets", "app_icon.ico"))
+            if os.path.exists(icon_path):
+                window.after(200, lambda: window.iconbitmap(icon_path))
+        except: pass
+
+        ctk.CTkLabel(window, 
+                     text=" Settings",          
+                     image=self.assets["settings"],   
+                     compound="left",                 
+                     font=("Arial", 18, "bold")).pack(pady=20)
         
         def clear_db():
             if messagebox.askyesno("Warning", "Delete all local messages history?"):
@@ -568,7 +788,7 @@ class GhostChatApp(ctk.CTk):
                 except Exception as e:
                     messagebox.showerror("Error", str(e))
 
-        ctk.CTkButton(window, text="🗑️ Clear Screen History", fg_color="#C62828", hover_color="#8B0000", command=clear_db).pack(pady=10)
+        ctk.CTkButton(window, text="Clear Screen History", fg_color="#C62828", hover_color="#8B0000", command=clear_db).pack(pady=10)
         ctk.CTkSwitch(window, text="Dark Mode", onvalue="Dark", offvalue="Light", command=lambda: ctk.set_appearance_mode("Dark")).pack(pady=10)
 
     def logout_app(self):
@@ -596,6 +816,12 @@ class GhostChatApp(ctk.CTk):
         dialog.title("Add New Contact")
         dialog.geometry("400x350")
         dialog.attributes("-topmost", True)
+        try:
+            icon_path = resource_path(os.path.join("assets", "app_icon.ico"))
+            if os.path.exists(icon_path):
+                dialog.after(200, lambda: dialog.iconbitmap(icon_path))
+        except: pass
+
         ctk.CTkLabel(dialog, text="Telegram Username (No @):").pack(pady=(20, 5))
         username_entry = ctk.CTkEntry(dialog, width=300)
         username_entry.pack(pady=5)
@@ -700,7 +926,6 @@ class GhostChatApp(ctk.CTk):
 
         assets_dir = resource_path("assets")
         
-        # نحدد من هو الـ Master (النافذة الأم) للصورة لتجنب الأخطاء
         image_master = root_window if root_window else self
 
         def load_icon(filename):
@@ -714,29 +939,27 @@ class GhostChatApp(ctk.CTk):
 
         menu = tk.Menu(target, tearoff=0, bg="white", fg="black")
 
-
         menu.icon_cut = load_icon("icon_cut.png")
         menu.icon_copy = load_icon("icon_copy.png")
         menu.icon_paste = load_icon("icon_paste.png")
         menu.icon_select = load_icon("icon_select_all.png")
 
-        
         menu.add_command(
-            label="  Cut",
+            label="✂️  Cut", 
             image=menu.icon_cut,
             compound="left",
             command=lambda: target.event_generate("<<Cut>>")
         )
         
         menu.add_command(
-            label="  Copy",
+            label="📄  Copy",
             image=menu.icon_copy,
             compound="left",
             command=lambda: target.event_generate("<<Copy>>")
         )
         
         menu.add_command(
-            label="  Paste",
+            label="📋  Paste",
             image=menu.icon_paste,
             compound="left",
             command=lambda: target.event_generate("<<Paste>>")
@@ -745,17 +968,21 @@ class GhostChatApp(ctk.CTk):
         menu.add_separator() 
         
         menu.add_command(
-            label="  Select All",
+            label="✅  Select All",
             image=menu.icon_select,
             compound="left",
             command=lambda: target.event_generate("<<SelectAll>>")
         )
 
         def show_menu(event):
-            menu.tk_popup(event.x_root, event.y_root)
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                menu.grab_release()
 
         target.bind("<Button-3>", show_menu) 
-        if target.winfo_name() != "win": 
+        
+        if sys.platform == "darwin": 
              target.bind("<Button-2>", show_menu)
              
         target.bind("<Control-c>", lambda e: target.event_generate("<<Copy>>"))
@@ -765,14 +992,12 @@ class GhostChatApp(ctk.CTk):
     def check_and_pull_model(self):
         model = "qwen2.5:0.5b"
         try:
-            # أضف shell=True لضمان العثور على الأمر في ويندوز أحياناً
             result = subprocess.run(["ollama", "list"], capture_output=True, text=True, check=True)
             if model not in result.stdout:
                 messagebox.showinfo("Setup", "First run setup: Downloading AI Model...")
                 subprocess.run(["ollama", "pull", model], check=True)
         except (subprocess.CalledProcessError, FileNotFoundError):
             messagebox.showerror("Error", "Ollama is not installed or not running. Please install it from ollama.com")
-            # لا تغلق البرنامج هنا إلا إذا كان حيوياً، أو تعامل مع الخطأ بهدوء
         except Exception as e:
             print(f"Ollama Check Error: {e}")
         
